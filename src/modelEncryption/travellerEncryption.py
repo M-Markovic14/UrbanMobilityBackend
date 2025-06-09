@@ -1,8 +1,7 @@
-import sqlite3
-from datetime import datetime
-from models import Traveller
-from crypto_utils import encrypt
 from typing import Tuple
+from datetime import datetime
+from models.traveller import Traveller
+from services.crypto_utils import encrypt, decrypt
 
 def traveller_to_encrypted_row(t: Traveller) -> Tuple:
     return (
@@ -21,13 +20,19 @@ def traveller_to_encrypted_row(t: Traveller) -> Tuple:
         t.registration_date.isoformat()
     )
 
-def add_new_traveller(conn, traveller: Traveller):
-    cursor = conn.cursor()
-    cursor.execute("""
-        INSERT INTO travellers (
-            id, first_name, last_name, birthday, gender,
-            street_name, house_number, zip_code, city,
-            email, mobile_phone, driving_license, registration_date
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, traveller_to_encrypted_row(traveller))
-    conn.commit()
+def row_to_traveller(row: tuple) -> Traveller:
+    return Traveller(
+        id=row[0],
+        first_name=decrypt(row[1]),
+        last_name=decrypt(row[2]),
+        birthday=row[3],
+        gender=row[4],
+        street_name=decrypt(row[5]),
+        house_number=decrypt(row[6]),
+        zip_code=decrypt(row[7]),
+        city=decrypt(row[8]),
+        email=decrypt(row[9]),
+        mobile_phone=decrypt(row[10]),
+        driving_license=decrypt(row[11]),
+        registration_date=datetime.fromisoformat(row[12])
+    )
