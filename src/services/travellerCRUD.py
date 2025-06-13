@@ -1,10 +1,13 @@
 import sqlite3
 from datetime import datetime
 import re
-from services.crypto_utils import decrypt
+from services.crypto_utils import decrypt, encrypt
 
 
-def create_traveller(conn):
+def create_traveller(conn, role, current_user):
+    if role.lower() not in ("sysadmin", "superadmin"):
+        print("Access denied: only SysAdmin and SuperAdmin can search traveller data.")
+        return
     cursor = conn.cursor()
 
     print("=== Register New Traveller ===")
@@ -116,40 +119,198 @@ def search_travellers(conn, role, current_user):
         return
 
     cursor = conn.cursor()
-    print("Search by: 1) Name  2) Email  3) City  4) ID")
-    option = input("Choose (1-4): ").strip()
+    
+    while True:
+        print("Search by: 1) Name  2) Email  3) City  4) ID")
+        option = input("Choose (1-4): ").strip()
+        if option in ("1", "2", "3", "4"):
+            break
+        else:
+            print("Invalid option. Choose a number between 1 and 4.")
 
     if option == "1":
         term = input("Enter name: ").strip()
+        if not term.replace(" ", "").isalpha():
+            print("Invalid name. Only letters and spaces are allowed.")
+            return
         query = "SELECT * FROM travellers WHERE first_name || ' ' || last_name LIKE ?"
+        param = (f"%{term}%",)
+
     elif option == "2":
-        term = input("Enter email: ").strip()
+        term = input("Enter email: ").strip().lower()
+        if not re.match(r"^[\w\.-]+@[\w\.-]+\.\w{2,}$", term):
+            print("Invalid email format.")
+            return
         query = "SELECT * FROM travellers WHERE email LIKE ?"
+        param = (f"%{term}%",)
+
     elif option == "3":
         term = input("Enter city: ").strip()
+        if not term.isalpha():
+            print("Invalid city name. Only letters allowed.")
+            return
         query = "SELECT * FROM travellers WHERE city LIKE ?"
+        param = (f"%{term}%",)
+
     elif option == "4":
         term = input("Enter ID: ").strip()
         if not term.isdigit():
-            print("Invalid ID.")
+            print("Invalid ID. Only digits are allowed.")
             return
         query = "SELECT * FROM travellers WHERE id = ?"
-        cursor.execute(query, (term,))
-    else:
-        print("Invalid choice.")
-        return
+        param = (term,)
 
-    if option != "4":
-        cursor.execute(query, (f"%{term}%",))
-
+    cursor.execute(query, param)
     results = cursor.fetchall()
 
     if not results:
         print("No matching traveller found.")
-    else:
-        print(f"\nFound {len(results)} result(s):")
-        for row in results:
-            print(f"ID: {row[0]} | Name: {row[1]} {row[2]} | City: {decrypt(row[8])} | Email: {decrypt(row[9])}")
+        return
+
+    print(f"\nFound {len(results)} result(s):")
+    for row in results:
+        try:
+            city = decrypt(row[8])
+            email = decrypt(row[9])
+        except Exception as e:
+            print("Error decrypting data.")
+            log_action(current_user, "Decryption failed during search", suspicious=True)
+            return
+
+        print(f"ID: {row[0]} | Name: {row[1]} {row[2]} | City: {city} | Email: {email}")
 
     # Log the search
     log_action(current_user, f"Searched travellers with term '{term}'", suspicious=False)
+
+
+
+def Update_traveller(conn, role, current_user):
+    if role.lower() not in ("sysadmin", "superadmin"):
+        print("Access denied: only SysAdmin and SuperAdmin can update traveller data.")
+        return
+
+    cursor = conn.cursor()
+
+    def prompt_update(label, old_value, is_encrypted=False, validator=None):
+        value = decrypt(old_value) if is_encrypted else old_value
+        new = input(f"{label} [{value}]: ").strip()
+        if new == "":
+            return old_value  
+        if validator and not validator(new):
+            print(f"Invalid {label}.")
+            return None
+        return encrypt(new) if is_encrypted else new
+
+    print("Search by: 1) Name  2) ID")
+    option = input("Choose (1-2): ").strip()
+
+    if option == "1":
+        first = input("Enter first name: ").strip()
+        last = input("Enter last name: ").strip()
+        if not first.isalpha() or not last.isalpha():
+            print("Invalid input. First and last names must contain only letters.")
+            return
+
+        encrypted_first = encrypt(first)
+        encrypted_last = encrypt(last)
+
+        query = """
+            SELECT first_name, last_name, birthday, gender,
+                   street_name, house_number, zip_code, city,
+                   email, mobile_phone, driving_license
+            FROM travellers
+            WHERE first_name = ? AND last_name = ?
+        """
+        param = (encrypted_first, encrypted_last)
+
+    elif option == "2":
+        traveller_id = input("Enter traveller ID: ").strip()
+        if not traveller_id.isdigit():
+            print("Invalid ID.")
+            return
+
+        query = """
+            SELECT first_name, last_name, birthday, gender,
+                   street_name, house_number, zip_code, city,
+                   email, mobile_phone, driving_license
+            FROM travellers
+            WHERE id = ?
+        """
+        param = (traveller_id,)
+    else:
+        print("Invalid choice.")
+        return
+
+    cursor.execute(query, param)
+    results = cursor.fetchall()
+
+    if not results:
+        print("No matching traveller found.")
+        return
+
+    if len(results) > 1:
+        print("\nMultiple travellers found:")
+        for i, row in enumerate(results):
+            print(f"{i+1}) {decrypt(row[0])} {decrypt(row[1])}")
+        choice = input("Select traveller number to update: ").strip()
+        if not choice.isdigit() or not (1 <= int(choice) <= len(results)):
+            print("Invalid selection.")
+            return
+        selected = results[int(choice) - 1]
+    else:
+        selected = results[0]
+
+    print("\nTraveller found:")
+    try:
+        print(
+            f"Name: {decrypt(selected[0])} {decrypt(selected[1])} | Birthday: {selected[2]} | Gender: {selected[3]} | "
+            f"Address: {decrypt(selected[4])} {selected[5]}, {selected[6]} {decrypt(selected[7])} | "
+            f"Email: {decrypt(selected[8])} | Phone: {decrypt(selected[9])} | License: {selected[10]}"
+        )
+    except Exception as e:
+        print("Error decrypting data.")
+        log_action(current_user, "Decryption failed during update", suspicious=True)
+        return
+
+    updated = {}
+    updated["first_name"] = prompt_update("First name", selected[0], is_encrypted=True, validator=str.isalpha)
+    updated["last_name"] = prompt_update("Last name", selected[1], is_encrypted=True, validator=str.isalpha)
+    updated["birthday"] = prompt_update("Birthday (YYYY-MM-DD)", selected[2], validator=lambda d: re.match(r"^\d{4}-\d{2}-\d{2}$", d))
+    updated["gender"] = prompt_update("Gender (male/female)", selected[3], validator=lambda g: g.lower() in ("male", "female"))
+    updated["street_name"] = prompt_update("Street", selected[4], is_encrypted=True)
+    updated["house_number"] = prompt_update("House number", selected[5], validator=str.isdigit)
+    updated["zip_code"] = prompt_update("Zip code", selected[6], validator=lambda z: re.match(r"^\d{4}[A-Z]{2}$", z))
+    updated["city"] = prompt_update("City", selected[7], is_encrypted=True)
+    updated["email"] = prompt_update("Email", selected[8], is_encrypted=True, validator=lambda e: re.match(r"^[\w\.-]+@[\w\.-]+\.\w{2,}$", e))
+    updated["mobile_phone"] = prompt_update("Phone (8 digits)", selected[9], is_encrypted=True, validator=lambda p: re.match(r"^\d{8}$", p))
+    updated["driving_license"] = prompt_update("Driving license", selected[10], validator=lambda d: re.match(r"^[A-Z]{1,2}\d{7,8}$", d))
+
+    if None in updated.values():
+        print("Update canceled due to invalid input.")
+        return
+
+    # Use ID or full name to identify the record
+    if option == "1":
+        where_clause = "WHERE first_name = ? AND last_name = ?"
+        where_param = (selected[0], selected[1])
+    else:
+        where_clause = "WHERE id = ?"
+        where_param = (param[0],)
+
+    cursor.execute(f"""
+        UPDATE travellers SET
+            first_name = ?, last_name = ?, birthday = ?, gender = ?,
+            street_name = ?, house_number = ?, zip_code = ?, city = ?,
+            email = ?, mobile_phone = ?, driving_license = ?
+        {where_clause}
+    """, (
+        updated["first_name"], updated["last_name"], updated["birthday"], updated["gender"],
+        updated["street_name"], updated["house_number"], updated["zip_code"], updated["city"],
+        updated["email"], updated["mobile_phone"], updated["driving_license"],
+        *where_param
+    ))
+
+    conn.commit()
+    print("Traveller updated successfully.")
+    log_action(current_user, "Updated traveller data", suspicious=False)
+
