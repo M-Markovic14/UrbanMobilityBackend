@@ -1,6 +1,7 @@
 import sqlite3
 from datetime import datetime
 import re
+from services.crypto_utils import decrypt
 
 
 def create_traveller(conn):
@@ -8,7 +9,6 @@ def create_traveller(conn):
 
     print("=== Register New Traveller ===")
 
-    # Get user input with validation
     while True:
         first_name = input("First Name: ").strip()
         if first_name.isalpha():
@@ -30,7 +30,6 @@ def create_traveller(conn):
             break
         except ValueError:
             print("Invalid date. Please use format YYYY-MM-DD.")
-
 
     while True:
         gender = input("Gender (male/female): ").strip().lower()
@@ -104,10 +103,53 @@ def create_traveller(conn):
         conn.commit()
         print("Traveller added successfully.")
 
-        # Log the action (you will encrypt this in your log handler)
+        # Log the action
         log_action("admin_user", "Added new traveller", suspicious=False)
 
     except Exception as e:
         print(f"Error inserting traveller: {e}")
 
-#def 
+
+def search_travellers(conn, role, current_user):
+    if role.lower() not in ("sysadmin", "superadmin"):
+        print("Access denied: only SysAdmin and SuperAdmin can search traveller data.")
+        return
+
+    cursor = conn.cursor()
+    print("Search by: 1) Name  2) Email  3) City  4) ID")
+    option = input("Choose (1-4): ").strip()
+
+    if option == "1":
+        term = input("Enter name: ").strip()
+        query = "SELECT * FROM travellers WHERE first_name || ' ' || last_name LIKE ?"
+    elif option == "2":
+        term = input("Enter email: ").strip()
+        query = "SELECT * FROM travellers WHERE email LIKE ?"
+    elif option == "3":
+        term = input("Enter city: ").strip()
+        query = "SELECT * FROM travellers WHERE city LIKE ?"
+    elif option == "4":
+        term = input("Enter ID: ").strip()
+        if not term.isdigit():
+            print("Invalid ID.")
+            return
+        query = "SELECT * FROM travellers WHERE id = ?"
+        cursor.execute(query, (term,))
+    else:
+        print("Invalid choice.")
+        return
+
+    if option != "4":
+        cursor.execute(query, (f"%{term}%",))
+
+    results = cursor.fetchall()
+
+    if not results:
+        print("No matching traveller found.")
+    else:
+        print(f"\nFound {len(results)} result(s):")
+        for row in results:
+            print(f"ID: {row[0]} | Name: {row[1]} {row[2]} | City: {decrypt(row[8])} | Email: {decrypt(row[9])}")
+
+    # Log the search
+    log_action(current_user, f"Searched travellers with term '{term}'", suspicious=False)
