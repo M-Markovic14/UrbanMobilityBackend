@@ -337,7 +337,7 @@ def Delete_traveller(conn, role, current_user):
         traveller_id = input("Enter traveller ID: ").strip()
         if not traveller_id.isdigit():
             print("Invalid ID. Please enter digits only.")
-            continue  # ask again
+            continue
 
         # Check if traveller exists
         query = """
