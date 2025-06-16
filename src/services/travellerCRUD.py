@@ -193,13 +193,18 @@ def Update_traveller(conn, role, current_user):
 
     def prompt_update(label, old_value, is_encrypted=False, validator=None):
         value = decrypt(old_value) if is_encrypted else old_value
-        new = input(f"{label} [{value}]: ").strip()
-        if new == "":
-            return old_value  
-        if validator and not validator(new):
-            print(f"Invalid {label}.")
-            return None
-        return encrypt(new) if is_encrypted else new
+
+        while True:
+            new = input(f"{label} [{value}]: ").strip()
+
+            if new == "":
+                return old_value  # keep current value
+
+            if validator and not validator(new):
+                print(f"Invalid {label}. Please try again.")
+                continue  # ask again
+
+            return encrypt(new) if is_encrypted else new
 
     print("Search by: 1) Name  2) ID")
     option = input("Choose (1-2): ").strip()
