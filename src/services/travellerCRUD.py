@@ -206,8 +206,13 @@ def Update_traveller(conn, role, current_user):
 
             return encrypt(new) if is_encrypted else new
 
-    print("Search by: 1) Name  2) ID")
-    option = input("Choose (1-2): ").strip()
+    while True:
+        print("Search by: 1) Name  2) ID")
+        option = input("Choose (1-2): ").strip()
+        if option in ("1", "2"):
+            break
+        else:
+            print("Invalid option. Choose the number 1 or 2.")
 
     if option == "1":
         first = input("Enter first name: ").strip()
@@ -221,8 +226,8 @@ def Update_traveller(conn, role, current_user):
 
         query = """
             SELECT first_name, last_name, birthday, gender,
-                   street_name, house_number, zip_code, city,
-                   email, mobile_phone, driving_license
+                street_name, house_number, zip_code, city,
+                email, mobile_phone, driving_license
             FROM travellers
             WHERE first_name = ? AND last_name = ?
         """
@@ -236,21 +241,21 @@ def Update_traveller(conn, role, current_user):
 
         query = """
             SELECT first_name, last_name, birthday, gender,
-                   street_name, house_number, zip_code, city,
-                   email, mobile_phone, driving_license
+                street_name, house_number, zip_code, city,
+                email, mobile_phone, driving_license
             FROM travellers
             WHERE id = ?
         """
         param = (traveller_id,)
-    else:
-        print("Invalid choice.")
-        return
 
     cursor.execute(query, param)
     results = cursor.fetchall()
 
     if not results:
-        print("No matching traveller found.")
+        if option == "2":
+            print(f"No traveller found with ID {traveller_id}.")
+        else:
+            print(f"No traveller found with name {first} {last}.")
         return
 
     if len(results) > 1:
@@ -319,3 +324,48 @@ def Update_traveller(conn, role, current_user):
     print("Traveller updated successfully.")
     log_action(current_user, "Updated traveller data", suspicious=False)
 
+
+def Delete_traveller(conn, role, current_user):
+    if role.lower() not in ("sysadmin", "superadmin"):
+        print("Access denied: only SysAdmin and SuperAdmin can delete traveller data.")
+        return
+
+    cursor = conn.cursor()
+
+    while True:
+        print("Delete traveller by ID")
+        traveller_id = input("Enter traveller ID: ").strip()
+        if not traveller_id.isdigit():
+            print("Invalid ID. Please enter digits only.")
+            continue  # ask again
+
+        # Check if traveller exists
+        query = """
+            SELECT first_name, last_name, email
+            FROM travellers
+            WHERE id = ?
+        """
+        cursor.execute(query, (traveller_id,))
+        result = cursor.fetchone()
+
+        if not result:
+            print(f"No traveller found with ID {traveller_id}.")
+            return
+
+        try:
+            name = f"{decrypt(result[0])} {decrypt(result[1])}"
+            email = decrypt(result[2])
+        except:
+            print("Error decrypting traveller info.")
+            return
+
+        print(f"\nTraveller found:\nName: {name}\nEmail: {email}")
+        confirm = input("Are you sure you want to delete this traveller? (y/n): ").strip().lower()
+        if confirm == "y":
+            cursor.execute("DELETE FROM travellers WHERE id = ?", (traveller_id,))
+            conn.commit()
+            print("Traveller deleted successfully.")
+            log_action(current_user, f"Deleted traveller ID {traveller_id}", suspicious=False)
+        else:
+            print("Deletion cancelled.")
+        break
