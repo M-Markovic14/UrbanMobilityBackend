@@ -1,40 +1,94 @@
 import sqlite3
-from services.UserAuth import (
-    login,
-    register_user,
-    insert_hardcoded_super_admin,
-    current_user
-)
+from services import UserAuthentication
+from services.scooterCRUD import create_scooter, update_scooter, delete_scooter, search_scooters
+from services.travellerCRUD import add_traveller, update_traveller, delete_traveller, search_traveller
 
-def main():
-    conn = sqlite3.connect("urban_mobility.db")
-    insert_hardcoded_super_admin(conn)
+from user_handlers import manage_users
+from backup_restore import create_backup, restore_backup
+from logs import view_logs
 
+def main_menu(auth, conn):
     while True:
-        print("\n=== Main Menu ===")
-        print("1. Login")
-        print("2. Register New User")
-        print("3. Exit")
-        action = input("Choose an option: ").strip()
+        if not auth.is_authenticated():
+            print("\n=== URBAN MOBILITY LOGIN ===")
+            if not auth.login():
+                continue
 
-        if action == "1":
-            if login(conn):
-                print(f"You are logged in as: {current_user['username']} with role: {current_user['role']}")
-            else:
-                print("Access denied.")
+        role = auth.get_current_user()["role"]
 
-        elif action == "2":
-            if current_user["role"] in ("superadmin", "sysadmin"):
-                register_user(conn, current_user["role"])
-            else:
-                print("You must be logged in as a sysadmin or superadmin to register users.")
+        print(f"\n=== MAIN MENU ({role.upper()}) ===")
+        print("1. Search scooter")
+        print("2. Update scooter")
 
-        elif action == "3":
-            print("in the making ...")
+        if auth.can("create_scooter"):
+            print("3. Add new scooter")
+        if auth.can("delete_scooter"):
+            print("4. Delete scooter")
+
+        if auth.can("add_traveller"):
+            print("5. Add new traveller")
+        if auth.can("update_traveller"):
+            print("6. Update traveller")
+        if auth.can("delete_traveller"):
+            print("7. Delete traveller")
+        if auth.can("search_traveller"):
+            print("8. Search traveller")
+
+        if auth.can("create_engineer") or auth.can("create_sysadmin"):
+            print("9. Manage users (engineers/sysadmins)")
+
+        if auth.can("view_logs"):
+            print("10. View logs")
+
+        if auth.can("create_backup"):
+            print("11. Create backup")
+        if auth.can("restore_backup"):
+            print("12. Restore backup")
+
+        print("L. Logout")
+        print("X. Exit")
+
+        choice = input("Choose an option: ").strip().lower()
+
+        if choice == "1":
+            search_scooters(conn, auth)
+        elif choice == "2":
+            update_scooter(conn, auth)
+        elif choice == "3" and auth.can("create_scooter"):
+            create_scooter(conn, auth)
+        elif choice == "4" and auth.can("delete_scooter"):
+            delete_scooter(conn, auth)
+        elif choice == "5" and auth.can("add_traveller"):
+            add_traveller(conn, auth)
+        elif choice == "6" and auth.can("update_traveller"):
+            update_traveller(conn, auth)
+        elif choice == "7" and auth.can("delete_traveller"):
+            delete_traveller(conn, auth)
+        elif choice == "8" and auth.can("search_traveller"):
+            search_traveller(conn, auth)
+        elif choice == "9" and (auth.can("create_engineer") or auth.can("create_sysadmin")):
+            manage_users(conn, auth)
+        elif choice == "10" and auth.can("view_logs"):
+            view_logs(conn, auth)
+        elif choice == "11" and auth.can("create_backup"):
+            create_backup(conn, auth)
+        elif choice == "12" and auth.can("restore_backup"):
+            restore_backup(conn, auth)
+        elif choice == "l":
+            auth.logout()
+        elif choice == "x":
+            print("Exiting system.")
             break
-
         else:
-            print("Invalid option. Please select 1, 2, or 3.")
+            print("Invalid choice or access denied.")
+
 
 if __name__ == "__main__":
-    main()
+    try:
+        conn = sqlite3.connect("urban_mobility.db")
+        auth = UserAuthentication(conn)
+        main_menu(auth, conn)
+    except KeyboardInterrupt:
+        print("\nSystem exited by user.")
+    finally:
+        conn.close()

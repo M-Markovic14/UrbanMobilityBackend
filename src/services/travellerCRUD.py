@@ -18,46 +18,71 @@ def prompt_valid(prompt_msg, validator, error_msg, is_encrypted=False):
             return encrypt(val) if is_encrypted else val
         print(error_msg)
 
-def add_traveller(conn, role, current_user):
-    if role.lower() not in ("sysadmin", "superadmin"):
-        print("Access denied: only SysAdmin and SuperAdmin can create traveller data.")
+def add_traveller(conn, auth):
+    if not auth.require_authentication():
+        return
+    if not auth.can("add_traveller"):
+        print("Access denied: you do not have permission to add travellers.")
         return
 
+    username = auth.get_current_user()["username"]
     cursor = conn.cursor()
 
     print("=== Register New Traveller === (Type 'cancel' to abort any field)")
 
-    first_name = prompt_valid("First Name: ", str.isalpha, "Only letters allowed")
+    first_name = prompt_valid("First Name: ", str.isalpha, "Only letters allowed", is_encrypted=True)
     if first_name is None: return
 
-    last_name = prompt_valid("Last Name: ", str.isalpha, "Only letters allowed")
+    last_name = prompt_valid("Last Name: ", str.isalpha, "Only letters allowed", is_encrypted=True)
     if last_name is None: return
 
-    birthday = prompt_valid("Birthday (YYYY-MM-DD): ", lambda x: re.fullmatch(r"\d{4}-\d{2}-\d{2}", x), "Invalid format")
+    birthday = prompt_valid("Birthday (YYYY-MM-DD): ",
+                            lambda x: re.fullmatch(r"\d{4}-\d{2}-\d{2}", x),
+                            "Invalid date format (YYYY-MM-DD)")
     if birthday is None: return
 
-    gender = prompt_valid("Gender (male/female): ", lambda x: x.lower() in ("male", "female"), "Invalid gender")
+    gender = prompt_valid("Gender (male/female): ",
+                          lambda x: x.lower() in ("male", "female"),
+                          "Must be 'male' or 'female'")
     if gender is None: return
 
-    street = prompt_valid("Street: ", str.isalpha, "Only letters allowed", is_encrypted=True)
+    street = prompt_valid("Street Name: ",
+                          lambda x: x.replace(" ", "").isalpha(),
+                          "Only letters and spaces allowed",
+                          is_encrypted=True)
     if street is None: return
 
-    house_number = prompt_valid("House Number: ", str.isdigit, "Only digits allowed")
+    house_number = prompt_valid("House Number: ",
+                                lambda x: x.isdigit(),
+                                "Only digits allowed")
     if house_number is None: return
 
-    zip_code = prompt_valid("Zip Code (e.g. 1234AB): ", lambda x: re.fullmatch(r"\d{4}[A-Z]{2}", x), "Invalid zip format")
+    zip_code = prompt_valid("Zip Code (e.g. 1234AB): ",
+                            lambda x: re.fullmatch(r"\d{4}[A-Z]{2}", x),
+                            "Invalid zip format (1234AB)")
     if zip_code is None: return
 
-    city = prompt_valid("City: ", lambda x: x.lower() in Citylist, "City not allowed", is_encrypted=True)
+    city = prompt_valid("City: ",
+                        lambda x: x.lower() in Citylist,
+                        "City not allowed",
+                        is_encrypted=True)
     if city is None: return
 
-    email = prompt_valid("Email: ", lambda x: re.fullmatch(r"^[\w\.-]+@[\w\.-]+\.\w{2,}$", x), "Invalid email", is_encrypted=True)
+    email = prompt_valid("Email: ",
+                         lambda x: re.fullmatch(r"^[\w\.-]+@[\w\.-]+\.\w{2,}$", x),
+                         "Invalid email format",
+                         is_encrypted=True)
     if email is None: return
 
-    mobile = prompt_valid("Mobile Phone (e.g. 612345678): ", lambda x: re.fullmatch(r"^6\d{8}$", x), "Invalid mobile", is_encrypted=True)
+    mobile = prompt_valid("Mobile Phone (e.g. 612345678): ",
+                          lambda x: re.fullmatch(r"^6\d{8}$", x),
+                          "Must be 9 digits, starting with 6",
+                          is_encrypted=True)
     if mobile is None: return
 
-    license_nr = prompt_valid("Driving License (XDDDDDDDD or XXDDDDDDD): ", lambda x: re.fullmatch(r"^[A-Z]{1,2}\d{7,8}$", x), "Invalid format")
+    license_nr = prompt_valid("Driving License (XDDDDDDDD or XXDDDDDDD): ",
+                              lambda x: re.fullmatch(r"^[A-Z]{1,2}\d{7,8}$", x),
+                              "Invalid license format")
     if license_nr is None: return
 
     reg_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -71,24 +96,28 @@ def add_traveller(conn, role, current_user):
             )
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            encrypt(first_name), encrypt(last_name), birthday, gender,
+            first_name, last_name, birthday, gender,
             street, house_number, zip_code, city,
             email, mobile, license_nr, reg_date
         ))
 
         conn.commit()
         print("Traveller added successfully.")
-        log_action(current_user, "Added new traveller", suspicious=False)
+        log_action(username, "Added new traveller", suspicious=False)
 
     except Exception as e:
         print(f"Error inserting traveller: {e}")
+        log_action(username, f"Error adding traveller: {e}", suspicious=True)
 
 
-def search_traveller(conn, role, current_user):
-    if role.lower() not in ("sysadmin", "superadmin"):
-        print("Access denied: only SysAdmin and SuperAdmin can search traveller data.")
+def search_traveller(conn, auth):
+    if not auth.require_authentication():
+        return
+    if not auth.can("search_traveller"):
+        print("Access denied: you do not have permission to search traveller data.")
         return
 
+    username = auth.get_current_user()["username"]
     cursor = conn.cursor()
 
     while True:
@@ -108,7 +137,7 @@ def search_traveller(conn, role, current_user):
         results = cursor.fetchall()
     except Exception as e:
         print("Database error during search.")
-        log_action(current_user, "Search query failed", suspicious=True)
+        log_action(username, "Search query failed", suspicious=True)
         return
 
     matches = []
@@ -122,15 +151,21 @@ def search_traveller(conn, role, current_user):
                 "email": decrypt(row[9]).lower(),
             }
 
-            combined = f"{decrypted_fields['first_name']} {decrypted_fields['last_name']}"
+            combined_name = f"{decrypted_fields['first_name']} {decrypted_fields['last_name']}"
 
             if (term in decrypted_fields['id'] or
                 term in decrypted_fields['first_name'] or
                 term in decrypted_fields['last_name'] or
-                term in combined or
+                term in combined_name or
                 term in decrypted_fields['email'] or
                 term in decrypted_fields['city']):
-                matches.append((row[0], decrypted_fields['first_name'], decrypted_fields['last_name'], decrypted_fields['city'], decrypted_fields['email']))
+                matches.append((
+                    row[0],
+                    decrypted_fields['first_name'],
+                    decrypted_fields['last_name'],
+                    decrypted_fields['city'],
+                    decrypted_fields['email']
+                ))
 
         except Exception:
             continue
@@ -143,15 +178,18 @@ def search_traveller(conn, role, current_user):
     for match in matches:
         print(f"ID: {match[0]} | Name: {match[1].title()} {match[2].title()} | City: {match[3].title()} | Email: {match[4]}")
 
-    log_action(current_user, f"Searched travellers with partial key '{term}'", suspicious=False)
+    log_action(username, f"Searched travellers with partial key '{term}'", suspicious=False)
 
 
 
-def update_traveller(conn, role, current_user):
-    if role.lower() not in ("sysadmin", "superadmin"):
-        print("Access denied: only SysAdmin and SuperAdmin can update traveller data.")
+def update_traveller(conn, auth):
+    if not auth.require_authentication():
+        return
+    if not auth.can("update_traveller"):
+        print("Access denied: you do not have permission to update traveller data.")
         return
 
+    username = auth.get_current_user()["username"]
     cursor = conn.cursor()
 
     while True:
@@ -168,7 +206,6 @@ def update_traveller(conn, role, current_user):
         if not first.isalpha() or not last.isalpha():
             print("Invalid input. Names must contain only letters.")
             return
-
         query = """
             SELECT id, first_name, last_name, birthday, gender,
                    street_name, house_number, zip_code, city,
@@ -183,7 +220,6 @@ def update_traveller(conn, role, current_user):
         if not traveller_id.isdigit():
             print("Invalid ID.")
             return
-
         query = """
             SELECT id, first_name, last_name, birthday, gender,
                    street_name, house_number, zip_code, city,
@@ -212,7 +248,7 @@ def update_traveller(conn, role, current_user):
         )
     except Exception:
         print("Error decrypting data.")
-        log_action(current_user, "Decryption failed during update", suspicious=True)
+        log_action(username, "Decryption failed during traveller update", suspicious=True)
         return
 
     def prompt_update(label, old_value, is_encrypted=False, validator=None):
@@ -240,29 +276,37 @@ def update_traveller(conn, role, current_user):
         "driving_license": prompt_update("License", selected[11], False, lambda d: re.fullmatch(r"^[A-Z]{1,2}\d{7,8}$", d))
     }
 
-    cursor.execute("""
-        UPDATE travellers SET
-            first_name = ?, last_name = ?, birthday = ?, gender = ?,
-            street_name = ?, house_number = ?, zip_code = ?, city = ?,
-            email = ?, mobile_phone = ?, driving_license = ?
-        WHERE id = ?
-    """, (
-        updated["first_name"], updated["last_name"], updated["birthday"], updated["gender"],
-        updated["street_name"], updated["house_number"], updated["zip_code"], updated["city"],
-        updated["email"], updated["mobile_phone"], updated["driving_license"],
-        traveller_id
-    ))
+    try:
+        cursor.execute("""
+            UPDATE travellers SET
+                first_name = ?, last_name = ?, birthday = ?, gender = ?,
+                street_name = ?, house_number = ?, zip_code = ?, city = ?,
+                email = ?, mobile_phone = ?, driving_license = ?
+            WHERE id = ?
+        """, (
+            updated["first_name"], updated["last_name"], updated["birthday"], updated["gender"],
+            updated["street_name"], updated["house_number"], updated["zip_code"], updated["city"],
+            updated["email"], updated["mobile_phone"], updated["driving_license"],
+            traveller_id
+        ))
 
-    conn.commit()
-    print("Traveller updated successfully.")
-    log_action(current_user, "Updated traveller data", suspicious=False)
+        conn.commit()
+        print("Traveller updated successfully.")
+        log_action(username, f"Updated traveller ID {traveller_id}", suspicious=False)
+    except Exception as e:
+        print("Error during update:", e)
+        log_action(username, f"Error updating traveller ID {traveller_id}: {e}", suspicious=True)
 
 
-def delete_traveller(conn, role, current_user):
-    if role.lower() not in ("sysadmin", "superadmin"):
-        print("Access denied: only SysAdmin and SuperAdmin can delete traveller data.")
+
+def delete_traveller(conn, auth):
+    if not auth.require_authentication():
+        return
+    if not auth.can("delete_traveller"):
+        print("Access denied: you do not have permission to delete travellers.")
         return
 
+    username = auth.get_current_user()["username"]
     cursor = conn.cursor()
 
     while True:
@@ -274,8 +318,9 @@ def delete_traveller(conn, role, current_user):
         try:
             cursor.execute("SELECT first_name, last_name, email FROM travellers WHERE id = ?", (traveller_id,))
             result = cursor.fetchone()
-        except Exception:
+        except Exception as e:
             print("Database error while fetching traveller.")
+            log_action(username, f"DB error fetching traveller ID {traveller_id}: {e}", suspicious=True)
             return
 
         if not result:
@@ -285,8 +330,9 @@ def delete_traveller(conn, role, current_user):
         try:
             name = f"{decrypt(result[0])} {decrypt(result[1])}"
             email = decrypt(result[2])
-        except Exception:
+        except Exception as e:
             print("Error decrypting traveller info.")
+            log_action(username, f"Decryption failed for traveller ID {traveller_id}: {e}", suspicious=True)
             return
 
         print(f"\nTraveller found:\nName: {name}\nEmail: {email}")
@@ -296,11 +342,13 @@ def delete_traveller(conn, role, current_user):
                 cursor.execute("DELETE FROM travellers WHERE id = ?", (traveller_id,))
                 conn.commit()
                 print("Traveller deleted successfully.")
-                log_action(current_user, f"Deleted traveller ID {traveller_id}", suspicious=False)
-            except Exception:
+                log_action(username, f"Deleted traveller ID {traveller_id}", suspicious=False)
+            except Exception as e:
                 print("Error deleting traveller.")
+                log_action(username, f"Error deleting traveller ID {traveller_id}: {e}", suspicious=True)
             break
         else:
             print("Deletion cancelled.")
             break
+
 
