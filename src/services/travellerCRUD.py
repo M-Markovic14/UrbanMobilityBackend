@@ -3,6 +3,11 @@ from datetime import datetime
 import re
 from services.crypto_utils import decrypt, encrypt
 
+Citylist = [
+    "amsterdam", "rotterdam", "schiedam", "utrecht", "eindhoven",
+    "tilburg", "groningen", "almere", "breda", "nijmegen"
+]
+
 
 def create_traveller(conn, role, current_user):
     if role.lower() not in ("sysadmin", "superadmin"):
@@ -62,11 +67,16 @@ def create_traveller(conn, role, current_user):
         print("Invalid zip code format.")
 
     while True:
-        city = input("city: ").strip()
+        city = input("City: ").lower().strip()
+        
         if city.isalpha():
-            break
+            if city in Citylist:
+                print(f"City '{city.title()}' is valid.")
+                break
+            else:
+                print("Invalid city. Choose a city that is allowed.")
         else:
-            print("Invalid city name. Only letters allowed")
+            print("Invalid city name. Only letters allowed.")
 
     while True:
         email = input("Email address (e.g. example@mail.com): ").strip().lower()
