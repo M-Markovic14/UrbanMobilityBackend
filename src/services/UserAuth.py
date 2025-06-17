@@ -227,23 +227,27 @@ class UserAuthentication:
         }
         print("Logged out successfully.")
 
-    def register_user(self, creator_role: str = None) -> bool:
-        """Enhanced user registration with proper validation"""
-        if not creator_role:
-            creator_role = self.current_user["role"]
-            
-        cursor = self.conn.cursor()
+    def create_user(conn, auth):
+        if not auth.require_authentication():
+            return
+        if not (auth.can("create_engineer") or auth.can("create_sysadmin")):
+            print("Access denied: you do not have permission to create users.")
+            return
+
+        current_user = auth.get_current_user()
+        username = current_user["username"]
+        cursor = conn.cursor()
+
         print("=== Register New User ===")
 
         try:
             # Username validation
             while True:
-                username = input("Username (8-10 characters): ").strip().lower()
-                if not self.validate_username(username):
-                    print("Invalid username format. Must be 8-10 characters, start with letter/underscore, contain only letters, numbers, underscores, apostrophes, periods.")
+                new_username = input("Username (8-10 characters): ").strip().lower()
+                if not auth.validate_username(new_username):
+                    print("Invalid username format. Must be 8-10 characters, start with letter/underscore, and use only valid characters.")
                     continue
-                    
-                cursor.execute("SELECT 1 FROM users WHERE username = ?", (encrypt(username),))
+                cursor.execute("SELECT 1 FROM users WHERE username = ?", (encrypt(new_username),))
                 if cursor.fetchone():
                     print("Username already exists.")
                 else:
@@ -252,46 +256,44 @@ class UserAuthentication:
             # Password validation
             while True:
                 password = input("Password: ").strip()
-                is_valid, message = self.validate_password(password)
+                is_valid, message = auth.validate_password(password)
                 if not is_valid:
                     print(f"Invalid password: {message}")
                 else:
                     break
 
-            # Role validation based on creator permissions
-            allowed_roles = ["engineer"]
-            if creator_role == "superadmin":
+            # Determine allowed roles
+            allowed_roles = []
+            if auth.can("create_engineer"):
+                allowed_roles.append("engineer")
+            if auth.can("create_sysadmin"):
                 allowed_roles.append("sysadmin")
 
             while True:
                 print(f"Available roles: {', '.join(allowed_roles)}")
-                role = input("Role: ").strip().lower()
-                if role in allowed_roles:
+                selected_role = input("Role: ").strip().lower()
+                if selected_role in allowed_roles:
                     break
-                else:
-                    print("Invalid role selection.")
+                print("Invalid role selection.")
 
             # Name validation
             while True:
                 first_name = input("First name: ").strip()
                 last_name = input("Last name: ").strip()
-                
                 if not first_name or not last_name:
                     print("First and last names are required.")
                     continue
-                    
                 if not first_name.replace(' ', '').replace('-', '').isalpha() or \
-                   not last_name.replace(' ', '').replace('-', '').isalpha():
+                not last_name.replace(' ', '').replace('-', '').isalpha():
                     print("Names must contain only letters, spaces, and hyphens.")
                     continue
-                    
                 break
 
-            # Create user
+            # Create user object
             user = User(
-                username=username,
+                username=new_username,
                 password_hash=hash_password(password),
-                role=role,
+                role=selected_role,
                 first_name=first_name,
                 last_name=last_name,
                 registration_date=datetime.now()
@@ -302,17 +304,17 @@ class UserAuthentication:
                 VALUES (?, ?, ?, ?, ?, ?)
             """, user_to_encrypted_row(user))
 
-            self.conn.commit()
+            conn.commit()
             print("User registered successfully.")
-            log_action(self.current_user["username"], f"Registered new user '{username}' with role '{role}'", suspicious=False)
+            log_action(username, f"Created user '{new_username}' with role '{selected_role}'", suspicious=False, conn=conn)
             return True
 
         except KeyboardInterrupt:
-            print("\nRegistration cancelled.")
+            print("\nUser creation cancelled.")
             return False
         except Exception as e:
-            print(f"Registration error: {str(e)}")
-            log_action(self.current_user["username"], f"Registration error: {str(e)}", suspicious=True)
+            print(f"Error creating user: {str(e)}")
+            log_action(username, f"Error creating user: {str(e)}", suspicious=True, conn=conn)
             return False
 
     def update_password(self, target_username: str = None) -> bool:
