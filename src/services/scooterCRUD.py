@@ -1,141 +1,287 @@
 import sqlite3
 from datetime import datetime
 import re
+from modelEncryption.scooterEncryption import scooter_to_encrypted_row, row_to_scooter
 from services.crypto_utils import decrypt, encrypt
+from utils.logger import log_action  
 
+def prompt_valid(prompt_msg, validator, error_msg):
+    while True:
+        val = input(prompt_msg).strip()
+        if val.lower() == "cancel":
+            return None
+        if validator(val):
+            return val
+        print(error_msg)
 
 def create_scooter(conn, role, current_user):
     if role.lower() not in ("sysadmin", "superadmin"):
-        print("Access denied: only SysAdmin and SuperAdmin can create an traveller data.")
+        print("Access denied: only SysAdmin and SuperAdmin can create scooter data.")
         return
+
     cursor = conn.cursor()
+    print("=== Register New Scooter === (Type 'cancel' to abort any field)")
 
-    print("=== Register New Scooter ===")
+    brand = prompt_valid("Brand: ", str.isalpha, "Only letters allowed.")
+    if brand is None: return
 
-    while True:
-        brand = input("Brand Name: ").strip()
-        if brand.isalpha():
-            break
-        else:
-            print("Invalid brand name. Only letters allowed")
+    model = prompt_valid("Model: ", str.isalnum, "Only letters/numbers allowed.")
+    if model is None: return
 
-    while True:
-        model = input("Model: ").strip()
-        if model.isalpha():
-            break
-        else:
-            print("Invalid model. Only letters allowed")
+    serial = prompt_valid("Serial (10–17 chars): ", lambda x: re.fullmatch(r"[A-Za-z0-9]{10,17}", x), "Must be 10–17 alphanumeric characters.")
+    if serial is None: return
 
-    while True:
-        serialnumber = input("Serial number (10–17 letters): ").strip()
-        
-        if serialnumber.isalpha():
-            length = len(serialnumber)
-            if length >= 10 and length <= 17:
-                break
-            elif length < 10:
-                print("Serial number is too short. Minimum 10 characters.")
-            else:
-                print("Serial number is too long. Maximum 17 characters.")
-        else:
-            print("Serial number must only contain letters (A–Z).")
+    speed = prompt_valid("Top speed (km/h): ", lambda x: x.isdigit() and 0 < int(x) <= 200, "Enter number between 1 and 200.")
+    if speed is None: return
+
+    capacity = prompt_valid("Battery capacity (Wh): ", lambda x: x.replace('.', '', 1).isdigit() and float(x) > 0, "Must be a positive number.")
+    if capacity is None: return
+
+    soc = prompt_valid("State of Charge (%): ", lambda x: x.isdigit() and 0 <= int(x) <= 100, "Must be between 0 and 100.")
+    if soc is None: return
 
     while True:
-        speed = input("Enter speed (e.g. 120kmh): ").strip().lower()
-        if re.match(r'^\d{1,3}\s?kmh$', speed):
-            print("Valid speed!")
-            break
-        else:
-            print("Invalid format. Please enter like '120kmh' or '120 kmh'.")
-
-    while True:
-        soc_range = input("Enter Target-range SoC (e.g. 20-80): ").strip()
-        if re.match(r'^\d{1,3}-\d{1,3}$', soc_range):
-            min_soc, max_soc = map(int, soc_range.split("-"))
+        target_soc = input("Target-range SoC (e.g. 20-80): ").strip()
+        if target_soc.lower() == "cancel":
+            return
+        if re.fullmatch(r'\d{1,3}-\d{1,3}', target_soc):
+            min_soc, max_soc = map(int, target_soc.split("-"))
             if 0 <= min_soc < max_soc <= 100:
-                print(f"Valid range: {min_soc}-{max_soc}%")
                 break
-            else:
-                print("Values must be between 0 and 100, and min < max.")
-        else:
-            print("Invalid format. Use two numbers like 20-80.")
-        while True:
-            house_number = input("House Number: ").strip()
-            if house_number.isdigit():
-                break
-            else: 
-                print("Invalid House Number. Only numbers allowed")
-    
+        print("Invalid range. Format: 20-80 (0 ≤ min < max ≤ 100).")
+
     while True:
-        lat = input("Enter latitude (e.g. 51.92250): ").strip()
-        lon = input("Enter longitude (e.g. 4.47917): ").strip()
-
-        if re.match(r'^-?\d{1,3}\.\d{5}$', lat) and re.match(r'^-?\d{1,3}\.\d{5}$', lon):
-            lat_f = float(lat)
-            lon_f = float(lon)
-
+        lat = input("Latitude (e.g. 51.92250): ").strip()
+        lon = input("Longitude (e.g. 4.47917): ").strip()
+        if lat.lower() == "cancel" or lon.lower() == "cancel":
+            return
+        if re.fullmatch(r'^-?\d{1,3}\.\d{5}$', lat) and re.fullmatch(r'^-?\d{1,3}\.\d{5}$', lon):
+            lat_f, lon_f = float(lat), float(lon)
             if 51.85 <= lat_f <= 52.00 and 4.40 <= lon_f <= 4.60:
-                print("Valid Rotterdam GPS location.")
                 break
-            else:
-                print("Coordinates must be within the Rotterdam region (lat 51.85–52.00, lon 4.40–4.60).")
-        else:
-            print("Invalid GPS format. Use exactly 5 decimals like 51.92250.")
+        print("Invalid or out-of-bounds GPS coordinates.")
 
-    while True:
-        city = input("City: ").lower().strip()
-        
-        if city.isalpha():
-            if city in Citylist:
-                print(f"City '{city.title()}' is valid.")
-                break
-            else:
-                print("Invalid city. Choose a city that is allowed.")
-        else:
-            print("Invalid city name. Only letters allowed.")
+    out_of_service = prompt_valid("Out of service? (yes/no): ", lambda x: x.lower() in ("yes", "no"), "Enter 'yes' or 'no'")
+    if out_of_service is None: return
+    out_of_service = 1 if out_of_service.lower() == "yes" else 0
 
-    while True:
-        email = input("Email address (e.g. example@mail.com): ").strip().lower()
-        if re.match(r"^[\w\.-]+@[\w\.-]+\.\w{2,}$", email):
-            break
-        print("Invalid email format.")
+    mileage = prompt_valid("Mileage (km): ", lambda x: x.replace('.', '', 1).isdigit() and float(x) >= 0, "Must be 0 or more.")
+    if mileage is None: return
 
-    while True:
-        mobile = input("Mobile Phone (e.g. 612345678): ").strip()
-        if re.match(r'^6\d{8}$', mobile):
-            break
-        print("Invalid mobile number format. It should start with 6 and have 9 digits total (e.g. 612345678).")
+    last_maintenance = prompt_valid("Last maintenance date (YYYY-MM-DD): ", lambda x: re.fullmatch(r'\d{4}-\d{2}-\d{2}', x), "Format must be YYYY-MM-DD.")
+    if last_maintenance is None: return
 
-    while True:
-        license_nr = input("Driving License Number (XDDDDDDDD or XXDDDDDDD): ").strip().upper()
-        if re.match(r'^[A-Z]{1,2}\d{7,8}$', license_nr):
-            break
-        print("Invalid driving license format.")
+    reg_date = datetime.now().isoformat()
 
-    reg_date = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    # Insert into the database
     try:
         cursor.execute('''
-            INSERT INTO travellers (
-                first_name, last_name, birthday, gender,
-                street_name, house_number, zip_code, city,
-                email, mobile_phone, driving_license, registration_date
-            )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO scooters (
+                brand, model, serial_number, top_speed,
+                battery_capacity, soc, target_soc_range,
+                latitude, longitude, out_of_service,
+                mileage, last_maintenance, in_service_date
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            first_name, last_name, birthday, gender,
-            street, house_number, zip_code, city,
-            email, mobile, license_nr, reg_date
+            encrypt(brand), encrypt(model), encrypt(serial), int(speed),
+            float(capacity), int(soc), target_soc,
+            encrypt(str(lat_f)), encrypt(str(lon_f)), out_of_service,
+            float(mileage), last_maintenance, reg_date
         ))
 
         conn.commit()
-        print("Traveller added successfully.")
-
-        # Log the action
-        log_action("admin_user", "Added new traveller", suspicious=False)
+        print("Scooter added successfully.")
+        log_action(current_user, f"Added scooter {serial}", suspicious=False)
 
     except Exception as e:
-        print(f"Error inserting traveller: {e}")
+        print(f"Error inserting scooter: {e}")
 
 
+def search_scooters(conn, role, current_user):
+    if role.lower() not in ("sysadmin", "superadmin", "engineer"):
+        print("Access denied.")
+        return
+
+    cursor = conn.cursor()
+    term = input("Enter search keyword (brand/model/serial): ").strip().lower()
+    if not term:
+        print("Search term cannot be empty.")
+        return
+
+    try:
+        cursor.execute("SELECT * FROM scooters")
+        results = cursor.fetchall()
+    except Exception as e:
+        print("Database error during scooter search.")
+        log_action(current_user, "Scooter search failed", suspicious=True)
+        return
+
+    matches = []
+    for row in results:
+        try:
+            scooter = row_to_scooter(row)
+            combined = f"{scooter.brand} {scooter.model} {scooter.serial_number}".lower()
+            if term in combined:
+                matches.append((scooter.serial_number, scooter.brand, scooter.model, scooter.soc, scooter.out_of_service))
+        except:
+            continue
+
+    if not matches:
+        print("No matching scooters found.")
+        return
+
+    print(f"\nFound {len(matches)} result(s):")
+    for m in matches:
+        print(f"Serial: {m[0]} | Brand: {m[1]} | Model: {m[2]} | SoC: {m[3]}% | Out-of-service: {'Yes' if m[4] else 'No'}")
+
+    log_action(current_user, f"Searched scooters with term '{term}'", suspicious=False)
+
+
+def update_scooter(conn, role, current_user):
+    cursor = conn.cursor()
+
+    serial = input("Enter serial number of scooter to update: ").strip()
+    if not serial:
+        print("Serial number is required.")
+        return
+
+    encrypted_serial = encrypt(serial)
+    cursor.execute("SELECT * FROM scooters WHERE serial_number = ?", (encrypted_serial,))
+    row = cursor.fetchone()
+    if not row:
+        print("Scooter not found.")
+        return
+
+    scooter = row_to_scooter(row)
+
+    def update_field(label, old_value, validator=str.isalnum, transform=lambda x: x):
+        val = input(f"{label} [{old_value}]: ").strip()
+        if val == "":
+            return old_value
+        if validator(val):
+            return transform(val)
+        print("Invalid input. Keeping old value.")
+        return old_value
+
+    engineer_allowed = {
+        "top_speed", "battery_capacity", "soc", "target_soc_range",
+        "latitude", "longitude", "out_of_service", "mileage", "last_maintenance"
+    }
+
+    updates = {}
+
+    for field in scooter.__dict__:
+        if field == "id" or field == "in_service_date":
+            continue
+        if role == "engineer" and field not in engineer_allowed:
+            continue
+        current_value = getattr(scooter, field)
+        updated_value = update_field(field.replace('_', ' ').title(), current_value,
+                                     lambda x: True, type(current_value))
+        updates[field] = updated_value
+
+    for k, v in updates.items():
+        setattr(scooter, k, v)
+
+    try:
+        cursor.execute('''
+            UPDATE scooters SET
+                brand = ?, model = ?, serial_number = ?, top_speed = ?, battery_capacity = ?,
+                soc = ?, target_soc_range = ?, latitude = ?, longitude = ?, out_of_service = ?,
+                mileage = ?, last_maintenance = ?
+            WHERE serial_number = ?
+        ''', scooter_to_encrypted_row(scooter)[:-1] + (encrypted_serial,))
+        conn.commit()
+        print("Scooter updated successfully.")
+        log_action(current_user, f"Updated scooter {serial}", suspicious=False)
+    except Exception as e:
+        print("Error during update:", e)
+
+
+def update_scooter(conn, role, current_user):
+    cursor = conn.cursor()
+
+    serial = input("Enter serial number of scooter to update: ").strip()
+    if not serial:
+        print("Serial number is required.")
+        return
+
+    encrypted_serial = encrypt(serial)
+    cursor.execute("SELECT * FROM scooters WHERE serial_number = ?", (encrypted_serial,))
+    row = cursor.fetchone()
+    if not row:
+        print("Scooter not found.")
+        return
+
+    scooter = row_to_scooter(row)
+
+    def update_field(label, old_value, validator=str.isalnum, transform=lambda x: x):
+        val = input(f"{label} [{old_value}]: ").strip()
+        if val == "":
+            return old_value
+        if validator(val):
+            return transform(val)
+        print("Invalid input. Keeping old value.")
+        return old_value
+
+    engineer_allowed = {
+        "top_speed", "battery_capacity", "soc", "target_soc_range",
+        "latitude", "longitude", "out_of_service", "mileage", "last_maintenance"
+    }
+
+    updates = {}
+
+    for field in scooter.__dict__:
+        if field == "id" or field == "in_service_date":
+            continue
+        if role == "engineer" and field not in engineer_allowed:
+            continue
+        current_value = getattr(scooter, field)
+        updated_value = update_field(field.replace('_', ' ').title(), current_value,
+                                     lambda x: True, type(current_value))
+        updates[field] = updated_value
+
+    for k, v in updates.items():
+        setattr(scooter, k, v)
+
+    try:
+        cursor.execute('''
+            UPDATE scooters SET
+                brand = ?, model = ?, serial_number = ?, top_speed = ?, battery_capacity = ?,
+                soc = ?, target_soc_range = ?, latitude = ?, longitude = ?, out_of_service = ?,
+                mileage = ?, last_maintenance = ?
+            WHERE serial_number = ?
+        ''', scooter_to_encrypted_row(scooter)[:-1] + (encrypted_serial,))
+        conn.commit()
+        print("Scooter updated successfully.")
+        log_action(current_user, f"Updated scooter {serial}", suspicious=False)
+    except Exception as e:
+        print("Error during update:", e)
+
+def delete_scooter(conn, role, current_user):
+    if role.lower() not in ("sysadmin", "superadmin"):
+        print("Access denied.")
+        return
+
+    cursor = conn.cursor()
+    serial = input("Enter serial number of scooter to delete: ").strip()
+    encrypted_serial = encrypt(serial)
+
+    cursor.execute("SELECT brand, model FROM scooters WHERE serial_number = ?", (encrypted_serial,))
+    result = cursor.fetchone()
+    if not result:
+        print("Scooter not found.")
+        return
+
+    brand, model = decrypt(result[0]), decrypt(result[1])
+    confirm = input(f"Delete scooter {brand} {model} ({serial})? (yes/no): ").strip().lower()
+    if confirm != "yes":
+        print("Deletion cancelled.")
+        return
+
+    try:
+        cursor.execute("DELETE FROM scooters WHERE serial_number = ?", (encrypted_serial,))
+        conn.commit()
+        print("Scooter deleted successfully.")
+        log_action(current_user, f"Deleted scooter {serial}", suspicious=False)
+    except Exception as e:
+        print("Error deleting scooter:", e)
