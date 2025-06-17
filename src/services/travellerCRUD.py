@@ -86,9 +86,9 @@ def create_traveller(conn, role, current_user):
 
     while True:
         mobile = input("Mobile Phone (e.g. 612345678): ").strip()
-        if re.match(r'^\d{8}$', mobile):
+        if re.match(r'^6\d{8}$', mobile):
             break
-        print("Invalid mobile number format.")
+        print("Invalid mobile number format. It should start with 6 and have 9 digits total (e.g. 612345678).")
 
     while True:
         license_nr = input("Driving License Number (XDDDDDDDD or XXDDDDDDD): ").strip().upper()
