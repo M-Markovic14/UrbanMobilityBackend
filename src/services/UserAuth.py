@@ -1,19 +1,20 @@
 import sqlite3
 import bcrypt
 import re
+import time
+from datetime import datetime
 from typing import Tuple
 from models.user import User
 from services.crypto_utils import encrypt, decrypt
-from datetime import datetime
 from modelEncryption.userEncryption import row_to_user, verify_password, hash_password, user_to_encrypted_row
+from utils.logger import log_action
 
-# In-memory session to store logged-in user info
+# In-memory session
 current_user = {
     "username": None,
     "role": None
 }
 
-# Hardcoded super admin account
 SUPER_ADMIN_USERNAME = "super_admin"
 SUPER_ADMIN_PASSWORD = "Admin_123?"
 
@@ -70,7 +71,6 @@ def register_user(conn, creator_role):
         else:
             break
 
-    # Role selection based on creator's role
     allowed_roles = ["engineer"]
     if creator_role == "superadmin":
         allowed_roles.append("sysadmin")
@@ -84,6 +84,10 @@ def register_user(conn, creator_role):
 
     first_name = input("First name: ").strip()
     last_name = input("Last name: ").strip()
+
+    if not first_name.isalpha() or not last_name.isalpha():
+        print("First and last names must contain only letters.")
+        return
 
     user = User(
         username=username,
@@ -101,24 +105,33 @@ def register_user(conn, creator_role):
 
     conn.commit()
     print("User registered successfully.")
-
+    log_action(current_user["username"], f"Registered new user '{username}'", suspicious=False)
 
 def login(conn):
     global current_user
-    username = input("Username: ").strip().lower()
-    password = input("Password: ").strip()
+    attempts = 0
 
-    cursor = conn.cursor()
-    cursor.execute("SELECT * FROM users WHERE username = ?", (encrypt(username),))
-    row = cursor.fetchone()
+    while attempts < 3:
+        username = input("Username: ").strip().lower()
+        password = input("Password: ").strip()
 
-    if row:
-        user = row_to_user(row)
-        if verify_password(password, user.password_hash):
-            current_user["username"] = user.username
-            current_user["role"] = user.role
-            print(f"Login successful. Welcome {user.first_name} {user.last_name} ({user.role})")
-            return True
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM users WHERE username = ?", (encrypt(username),))
+        row = cursor.fetchone()
 
-    print("Invalid username or password.")
+        if row:
+            user = row_to_user(row)
+            if verify_password(password, user.password_hash):
+                current_user["username"] = user.username
+                current_user["role"] = user.role
+                print(f"Login successful. Welcome {user.first_name} {user.last_name} ({user.role})")
+                log_action(username, "Login successful", suspicious=False)
+                return True
+
+        print("Invalid username or password.")
+        log_action(username, "Failed login attempt", suspicious=True)
+        attempts += 1
+        time.sleep(2)  # Delay to slow down brute-force attacks
+
+    print("Too many failed attempts. Try again later.")
     return False
