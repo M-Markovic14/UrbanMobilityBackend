@@ -7,7 +7,7 @@ from typing import Tuple, Optional
 from models.user import User
 from services.crypto_utils import encrypt, decrypt
 from modelEncryption.userEncryption import row_to_user, verify_password, hash_password, user_to_encrypted_row
-from utils.logger import log_action
+from services.logCRUD import log_action
 from role_permissions_config import ROLE_PERMISSIONS
 
 

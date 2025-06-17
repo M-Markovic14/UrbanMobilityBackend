@@ -2,7 +2,7 @@ import sqlite3
 import re
 from datetime import datetime
 from services.crypto_utils import decrypt, encrypt
-from utils.logger import log_action
+from services.logCRUD import log_action
 
 Citylist = [
     "amsterdam", "rotterdam", "schiedam", "utrecht", "eindhoven",

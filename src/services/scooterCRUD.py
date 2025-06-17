@@ -3,7 +3,7 @@ from datetime import datetime
 import re
 from modelEncryption.scooterEncryption import scooter_to_encrypted_row, row_to_scooter
 from services.crypto_utils import decrypt, encrypt
-from utils.logger import log_action  
+from services.logCRUD import log_action
 from role_permissions_config import ROLE_PERMISSIONS
 from services import UserAuth
 
