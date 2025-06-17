@@ -5,7 +5,7 @@ from modelEncryption.scooterEncryption import scooter_to_encrypted_row, row_to_s
 from services.crypto_utils import decrypt, encrypt
 from services.logCRUD import log_action
 from role_permissions_config import ROLE_PERMISSIONS
-from services import UserAuth
+from UrbanMobilityBackend.src.services import UserAuth
 
 
 def prompt_valid(prompt_msg, validator, error_msg):

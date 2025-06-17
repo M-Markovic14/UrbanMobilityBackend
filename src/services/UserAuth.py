@@ -188,9 +188,6 @@ class UserAuthentication:
                         print(f"Login successful. Welcome {user.first_name} {user.last_name} ({user.role})")
                         log_action(username, "Login successful", suspicious=False)
                         
-                        # Check for unread suspicious activities
-                        self.check_suspicious_activities()
-                        
                         return True
 
                 # Failed login
@@ -227,16 +224,15 @@ class UserAuthentication:
         }
         print("Logged out successfully.")
 
-    def create_user(conn, auth):
-        if not auth.require_authentication():
+    def create_user(self):
+        if not self.require_authentication():
             return
-        if not (auth.can("create_engineer") or auth.can("create_sysadmin")):
+        if not (self.can("create_engineer") or self.can("create_sysadmin")):
             print("Access denied: you do not have permission to create users.")
             return
 
-        current_user = auth.get_current_user()
-        username = current_user["username"]
-        cursor = conn.cursor()
+        username = self.current_user["username"]
+        cursor = self.conn.cursor()
 
         print("=== Register New User ===")
 
@@ -244,7 +240,7 @@ class UserAuthentication:
             # Username validation
             while True:
                 new_username = input("Username (8-10 characters): ").strip().lower()
-                if not auth.validate_username(new_username):
+                if not self.validate_username(new_username):
                     print("Invalid username format. Must be 8-10 characters, start with letter/underscore, and use only valid characters.")
                     continue
                 cursor.execute("SELECT 1 FROM users WHERE username = ?", (encrypt(new_username),))
@@ -256,7 +252,7 @@ class UserAuthentication:
             # Password validation
             while True:
                 password = input("Password: ").strip()
-                is_valid, message = auth.validate_password(password)
+                is_valid, message = self.validate_password(password)
                 if not is_valid:
                     print(f"Invalid password: {message}")
                 else:
@@ -264,9 +260,9 @@ class UserAuthentication:
 
             # Determine allowed roles
             allowed_roles = []
-            if auth.can("create_engineer"):
+            if self.can("create_engineer"):
                 allowed_roles.append("engineer")
-            if auth.can("create_sysadmin"):
+            if self.can("create_sysadmin"):
                 allowed_roles.append("sysadmin")
 
             while True:
@@ -304,9 +300,9 @@ class UserAuthentication:
                 VALUES (?, ?, ?, ?, ?, ?)
             """, user_to_encrypted_row(user))
 
-            conn.commit()
+            self.conn.commit()
             print("User registered successfully.")
-            log_action(username, f"Created user '{new_username}' with role '{selected_role}'", suspicious=False, conn=conn)
+            log_action(username, f"Created user '{new_username}' with role '{selected_role}'", suspicious=False, conn=self.conn)
             return True
 
         except KeyboardInterrupt:
@@ -314,9 +310,10 @@ class UserAuthentication:
             return False
         except Exception as e:
             print(f"Error creating user: {str(e)}")
-            log_action(username, f"Error creating user: {str(e)}", suspicious=True, conn=conn)
+            log_action(username, f"Error creating user: {str(e)}", suspicious=True, conn=self.conn)
             return False
-
+        
+        
     def update_password(self, target_username: str = None) -> bool:
         """Update password for current user or target user"""
         try:
@@ -376,24 +373,6 @@ class UserAuthentication:
             print(f"Password update error: {str(e)}")
             log_action(self.current_user["username"], f"Password update error: {str(e)}", suspicious=True)
             return False
-
-    def check_suspicious_activities(self):
-        """Check and alert about suspicious activities in logs"""
-        try:
-            # This would integrate with your logging system
-            # For now, just print a notification
-            suspicious_count = self.get_unread_suspicious_count()
-            if suspicious_count > 0:
-                print(f"\n⚠️  ALERT: {suspicious_count} unread suspicious activities detected!")
-                print("Check the logs for details.\n")
-        except Exception as e:
-            log_action("SYSTEM", f"Error checking suspicious activities: {str(e)}", suspicious=True)
-
-    def get_unread_suspicious_count(self) -> int:
-        """Get count of unread suspicious activities"""
-        # This would integrate with your logging system
-        # Placeholder implementation
-        return 0
 
     def is_authenticated(self) -> bool:
         """Check if user is authenticated and session is valid"""
