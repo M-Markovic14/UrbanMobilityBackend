@@ -3,7 +3,7 @@ import os
 
 # Ensure db is created in the same folder as this script
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-db_path = os.path.join(BASE_DIR, "db.sqlite3")
+db_path = os.path.join(BASE_DIR, "urban_mobility.db")
 
 conn = sqlite3.connect(db_path)
 cursor = conn.cursor()
@@ -75,4 +75,4 @@ CREATE TABLE IF NOT EXISTS log_entries (
 conn.commit()
 conn.close()
 
-print(f"✅ Database initialized at {db_path}")
+print(f"Database initialized at {db_path}")

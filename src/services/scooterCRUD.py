@@ -4,8 +4,8 @@ import re
 from modelEncryption.scooterEncryption import scooter_to_encrypted_row, row_to_scooter
 from services.crypto_utils import decrypt, encrypt
 from services.logCRUD import log_action
-from role_permissions_config import ROLE_PERMISSIONS
-from UrbanMobilityBackend.src.services import UserAuth
+from services.role_permissions_config import ROLE_PERMISSIONS  
+from services.UserAuth import UserAuthentication  
 
 
 def prompt_valid(prompt_msg, validator, error_msg):

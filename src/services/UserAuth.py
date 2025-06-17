@@ -8,7 +8,8 @@ from models.user import User
 from services.crypto_utils import encrypt, decrypt
 from modelEncryption.userEncryption import row_to_user, verify_password, hash_password, user_to_encrypted_row
 from services.logCRUD import log_action
-from role_permissions_config import ROLE_PERMISSIONS
+from services.role_permissions_config import ROLE_PERMISSIONS
+
 
 
 class UserAuthentication:

@@ -1,10 +1,10 @@
 import sqlite3
-from services.UserAuth import UserAuthentication
+from services.UserAuth import UserAuthentication  
 from services.scooterCRUD import create_scooter, update_scooter, delete_scooter, search_scooters
 from services.travellerCRUD import add_traveller, update_traveller, delete_traveller, search_traveller
 
-from backup_restore import create_backup, restore_backup
-from logs import view_logs
+#from backup_restore import create_backup, restore_backup
+#from logs import view_logs
 
 def main_menu(auth, conn):
     while True:
@@ -65,7 +65,7 @@ def main_menu(auth, conn):
             delete_traveller(conn, auth)
         elif choice == "8" and auth.can("search_traveller"):
             search_traveller(conn, auth)
-        elif choice == "9" and (auth.can("create_engineer") or auth.can("create_sysadmin")):
+        elif choice == "9":
             auth.create_user()
         elif choice == "10" and auth.can("view_logs"):
             view_logs(conn, auth)

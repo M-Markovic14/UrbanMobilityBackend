@@ -1,7 +1,10 @@
 from cryptography.fernet import Fernet
+import os
+
 
 def load_key():
-    with open("secret.key", "rb") as f:
+    key_path = os.path.join(os.path.dirname(__file__), "secret.key")
+    with open(key_path, "rb") as f:
         return f.read()
 
 fernet = Fernet(load_key())
