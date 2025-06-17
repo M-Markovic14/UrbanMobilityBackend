@@ -11,7 +11,7 @@ Citylist = [
 
 def create_traveller(conn, role, current_user):
     if role.lower() not in ("sysadmin", "superadmin"):
-        print("Access denied: only SysAdmin and SuperAdmin can search traveller data.")
+        print("Access denied: only SysAdmin and SuperAdmin can create an traveller data.")
         return
     cursor = conn.cursor()
 
