@@ -4,6 +4,9 @@ import re
 from modelEncryption.scooterEncryption import scooter_to_encrypted_row, row_to_scooter
 from services.crypto_utils import decrypt, encrypt
 from utils.logger import log_action  
+from role_permissions_config import ROLE_PERMISSIONS
+from services import UserAuth
+
 
 def prompt_valid(prompt_msg, validator, error_msg):
     while True:
@@ -14,9 +17,11 @@ def prompt_valid(prompt_msg, validator, error_msg):
             return val
         print(error_msg)
 
-def create_scooter(conn, role, current_user):
-    if role.lower() not in ("sysadmin", "superadmin"):
-        print("Access denied: only SysAdmin and SuperAdmin can create scooter data.")
+def create_scooter(conn, auth):
+    if not auth.require_authentication():
+        return
+    if not auth.can("create_scooter"):
+        print("Access denied: you do not have permission to create scooter data.")
         return
 
     cursor = conn.cursor()
@@ -72,6 +77,7 @@ def create_scooter(conn, role, current_user):
     if last_maintenance is None: return
 
     reg_date = datetime.now().isoformat()
+    username = auth.get_current_user()["username"]
 
     try:
         cursor.execute('''
@@ -90,19 +96,23 @@ def create_scooter(conn, role, current_user):
 
         conn.commit()
         print("Scooter added successfully.")
-        log_action(current_user, f"Added scooter {serial}", suspicious=False)
+        log_action(username, f"Added scooter {serial}", suspicious=False)
 
     except Exception as e:
         print(f"Error inserting scooter: {e}")
+        log_action(username, f"Failed to add scooter {serial}: {e}", suspicious=True)
 
 
-def search_scooters(conn, role, current_user):
-    if role.lower() not in ("sysadmin", "superadmin", "engineer"):
-        print("Access denied.")
+
+def search_scooters(conn, auth):
+    if not auth.require_authentication():
+        return
+    if not auth.can("search_scooter"):
+        print("Access denied: you do not have permission to search scooters.")
         return
 
     cursor = conn.cursor()
-    term = input("Enter search keyword (brand/model/serial): ").strip().lower()
+    term = input("Enter search term (brand, model, serial, or GPS): ").strip().lower()
     if not term:
         print("Search term cannot be empty.")
         return
@@ -112,17 +122,33 @@ def search_scooters(conn, role, current_user):
         results = cursor.fetchall()
     except Exception as e:
         print("Database error during scooter search.")
-        log_action(current_user, "Scooter search failed", suspicious=True)
+        log_action(auth.get_current_user()["username"], "Scooter search failed", suspicious=True)
         return
 
     matches = []
     for row in results:
         try:
             scooter = row_to_scooter(row)
-            combined = f"{scooter.brand} {scooter.model} {scooter.serial_number}".lower()
-            if term in combined:
-                matches.append((scooter.serial_number, scooter.brand, scooter.model, scooter.soc, scooter.out_of_service))
-        except:
+            # Build combined searchable string
+            searchable = " ".join([
+                scooter.brand,
+                scooter.model,
+                scooter.serial_number,
+                str(scooter.latitude),
+                str(scooter.longitude)
+            ]).lower()
+
+            if term in searchable:
+                matches.append((
+                    scooter.serial_number,
+                    scooter.brand,
+                    scooter.model,
+                    scooter.latitude,
+                    scooter.longitude,
+                    scooter.soc,
+                    scooter.out_of_service
+                ))
+        except Exception:
             continue
 
     if not matches:
@@ -131,48 +157,70 @@ def search_scooters(conn, role, current_user):
 
     print(f"\nFound {len(matches)} result(s):")
     for m in matches:
-        print(f"Serial: {m[0]} | Brand: {m[1]} | Model: {m[2]} | SoC: {m[3]}% | Out-of-service: {'Yes' if m[4] else 'No'}")
+        print(
+            f"Serial: {m[0]} | Brand: {m[1]} | Model: {m[2]} | "
+            f"Lat: {m[3]} | Lon: {m[4]} | SoC: {m[5]}% | Out-of-service: {'Yes' if m[6] else 'No'}"
+        )
 
-    log_action(current_user, f"Searched scooters with term '{term}'", suspicious=False)
+    log_action(auth.get_current_user()["username"], f"Searched scooters with term '{term}'", suspicious=False)
 
 
-def update_scooter(conn, role, current_user):
+def update_scooter(conn, auth):
+    if not auth.require_authentication():
+        return
+    if not auth.can("update_scooter"):
+        print("Access denied: you do not have permission to update scooters.")
+        return
+
+    role = auth.get_current_user()["role"]
+    username = auth.get_current_user()["username"]
     cursor = conn.cursor()
 
-    serial = input("Enter serial number of scooter to update: ").strip()
-    if not serial:
-        print("Serial number is required.")
-        return
+    while True:
+        serial = input("Enter serial number of scooter to update: ").strip()
+        if not serial:
+            print("Serial number is required.")
+            continue
 
-    encrypted_serial = encrypt(serial)
-    cursor.execute("SELECT * FROM scooters WHERE serial_number = ?", (encrypted_serial,))
-    row = cursor.fetchone()
-    if not row:
-        print("Scooter not found.")
-        return
+        encrypted_serial = encrypt(serial)
+        cursor.execute("SELECT * FROM scooters WHERE serial_number = ?", (encrypted_serial,))
+        row = cursor.fetchone()
+
+        if not row:
+            print("Scooter not found. Try again.")
+        else:
+            break
 
     scooter = row_to_scooter(row)
 
-    def update_field(label, old_value, validator=str.isalnum, transform=lambda x: x):
-        val = input(f"{label} [{old_value}]: ").strip()
-        if val == "":
-            return old_value
-        if validator(val):
-            return transform(val)
-        print("Invalid input. Keeping old value.")
-        return old_value
-
-    engineer_allowed = {
-        "top_speed", "battery_capacity", "soc", "target_soc_range",
-        "latitude", "longitude", "out_of_service", "mileage", "last_maintenance"
+    # Role-based editable fields
+    editable_fields = {
+        "engineer": {
+            "top_speed", "battery_capacity", "soc", "target_soc_range",
+            "latitude", "longitude", "out_of_service", "mileage", "last_maintenance"
+        },
+        "sysadmin": set(),  # fallthrough to superadmin
+        "superadmin": {
+            "brand", "model", "serial_number", "top_speed", "battery_capacity", "soc",
+            "target_soc_range", "latitude", "longitude", "out_of_service", "mileage", "last_maintenance"
+        }
     }
+    allowed_fields = editable_fields["superadmin"] if role != "engineer" else editable_fields["engineer"]
+
+    def update_field(label, old_value, validator=str.isalnum, transform=lambda x: x):
+        while True:
+            val = input(f"{label} [{old_value}]: ").strip()
+            if val == "":
+                return old_value
+            if validator(val):
+                return transform(val)
+            print("Invalid input. Try again.")
 
     updates = {}
-
     for field in scooter.__dict__:
-        if field == "id" or field == "in_service_date":
+        if field in ("id", "in_service_date"):
             continue
-        if role == "engineer" and field not in engineer_allowed:
+        if field not in allowed_fields:
             continue
         current_value = getattr(scooter, field)
         updated_value = update_field(field.replace('_', ' ').title(), current_value,
@@ -192,85 +240,36 @@ def update_scooter(conn, role, current_user):
         ''', scooter_to_encrypted_row(scooter)[:-1] + (encrypted_serial,))
         conn.commit()
         print("Scooter updated successfully.")
-        log_action(current_user, f"Updated scooter {serial}", suspicious=False)
+        log_action(username, f"Updated scooter {serial}", suspicious=False)
     except Exception as e:
         print("Error during update:", e)
+        log_action(username, f"Error updating scooter {serial}: {e}", suspicious=True)
 
 
-def update_scooter(conn, role, current_user):
+def delete_scooter(conn, auth):
+    if not auth.require_authentication():
+        return
+    if not auth.can("delete_scooter"):
+        print("Access denied: you do not have permission to delete scooters.")
+        return
+
+    username = auth.get_current_user()["username"]
     cursor = conn.cursor()
 
-    serial = input("Enter serial number of scooter to update: ").strip()
-    if not serial:
-        print("Serial number is required.")
-        return
-
-    encrypted_serial = encrypt(serial)
-    cursor.execute("SELECT * FROM scooters WHERE serial_number = ?", (encrypted_serial,))
-    row = cursor.fetchone()
-    if not row:
-        print("Scooter not found.")
-        return
-
-    scooter = row_to_scooter(row)
-
-    def update_field(label, old_value, validator=str.isalnum, transform=lambda x: x):
-        val = input(f"{label} [{old_value}]: ").strip()
-        if val == "":
-            return old_value
-        if validator(val):
-            return transform(val)
-        print("Invalid input. Keeping old value.")
-        return old_value
-
-    engineer_allowed = {
-        "top_speed", "battery_capacity", "soc", "target_soc_range",
-        "latitude", "longitude", "out_of_service", "mileage", "last_maintenance"
-    }
-
-    updates = {}
-
-    for field in scooter.__dict__:
-        if field == "id" or field == "in_service_date":
+    while True:
+        serial = input("Enter serial number of scooter to delete: ").strip()
+        if not serial:
+            print("Serial number is required.")
             continue
-        if role == "engineer" and field not in engineer_allowed:
-            continue
-        current_value = getattr(scooter, field)
-        updated_value = update_field(field.replace('_', ' ').title(), current_value,
-                                     lambda x: True, type(current_value))
-        updates[field] = updated_value
 
-    for k, v in updates.items():
-        setattr(scooter, k, v)
+        encrypted_serial = encrypt(serial)
+        cursor.execute("SELECT brand, model FROM scooters WHERE serial_number = ?", (encrypted_serial,))
+        result = cursor.fetchone()
 
-    try:
-        cursor.execute('''
-            UPDATE scooters SET
-                brand = ?, model = ?, serial_number = ?, top_speed = ?, battery_capacity = ?,
-                soc = ?, target_soc_range = ?, latitude = ?, longitude = ?, out_of_service = ?,
-                mileage = ?, last_maintenance = ?
-            WHERE serial_number = ?
-        ''', scooter_to_encrypted_row(scooter)[:-1] + (encrypted_serial,))
-        conn.commit()
-        print("Scooter updated successfully.")
-        log_action(current_user, f"Updated scooter {serial}", suspicious=False)
-    except Exception as e:
-        print("Error during update:", e)
-
-def delete_scooter(conn, role, current_user):
-    if role.lower() not in ("sysadmin", "superadmin"):
-        print("Access denied.")
-        return
-
-    cursor = conn.cursor()
-    serial = input("Enter serial number of scooter to delete: ").strip()
-    encrypted_serial = encrypt(serial)
-
-    cursor.execute("SELECT brand, model FROM scooters WHERE serial_number = ?", (encrypted_serial,))
-    result = cursor.fetchone()
-    if not result:
-        print("Scooter not found.")
-        return
+        if not result:
+            print("Scooter not found. Try again.")
+        else:
+            break
 
     brand, model = decrypt(result[0]), decrypt(result[1])
     confirm = input(f"Delete scooter {brand} {model} ({serial})? (yes/no): ").strip().lower()
@@ -282,6 +281,7 @@ def delete_scooter(conn, role, current_user):
         cursor.execute("DELETE FROM scooters WHERE serial_number = ?", (encrypted_serial,))
         conn.commit()
         print("Scooter deleted successfully.")
-        log_action(current_user, f"Deleted scooter {serial}", suspicious=False)
+        log_action(username, f"Deleted scooter {serial}", suspicious=False)
     except Exception as e:
         print("Error deleting scooter:", e)
+        log_action(username, f"Error deleting scooter {serial}: {e}", suspicious=True)

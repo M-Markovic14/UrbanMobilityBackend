@@ -18,7 +18,7 @@ def prompt_valid(prompt_msg, validator, error_msg, is_encrypted=False):
             return encrypt(val) if is_encrypted else val
         print(error_msg)
 
-def create_traveller(conn, role, current_user):
+def add_traveller(conn, role, current_user):
     if role.lower() not in ("sysadmin", "superadmin"):
         print("Access denied: only SysAdmin and SuperAdmin can create traveller data.")
         return
@@ -84,7 +84,7 @@ def create_traveller(conn, role, current_user):
         print(f"Error inserting traveller: {e}")
 
 
-def search_travellers(conn, role, current_user):
+def search_traveller(conn, role, current_user):
     if role.lower() not in ("sysadmin", "superadmin"):
         print("Access denied: only SysAdmin and SuperAdmin can search traveller data.")
         return
